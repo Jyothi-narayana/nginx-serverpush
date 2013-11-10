@@ -26,6 +26,7 @@ static ngx_chain_t* myChain;
 #define ngx_http_spdy_nv_write_nlen  ngx_spdy_frame_write_uint16
 #define ngx_http_spdy_nv_write_vlen  ngx_spdy_frame_write_uint16
 
+
 #define ngx_http_spdy_nv_write_name(p, h)                                     \
     ngx_cpymem(ngx_http_spdy_nv_write_nlen(p, sizeof(h) - 1), h, sizeof(h) - 1)
 
@@ -61,8 +62,13 @@ static void ngx_http_spdy_filter_cleanup(void *data);
 
 static ngx_int_t ngx_http_spdy_serverpush_filter_init(ngx_conf_t *cf);
 
+#if 1
+static ngx_int_t even_stream_id = 0;
+static ngx_int_t get_next_even_stream_id();
+#endif
+
+
 static ngx_int_t ngx_http_static_handler(ngx_http_request_t *r);
-/*static ngx_int_t ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in);*/
 static ngx_http_module_t  ngx_http_spdy_serverpush_filter_module_ctx = {
     NULL,                                  /* preconfiguration */
     ngx_http_spdy_serverpush_filter_init,             /* postconfiguration */
@@ -132,7 +138,6 @@ ngx_http_spdy_serverpush_header_filter(ngx_http_request_t *r)
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "spdy serverpush module header filter");
 
-//&r->uri="https://localhost/one.html";
     if (r->header_sent) {
         return NGX_OK;
     }
@@ -173,13 +178,11 @@ ngx_http_spdy_serverpush_header_filter(ngx_http_request_t *r)
         r->headers_out.last_modified_time = -1;
         r->headers_out.last_modified = NULL;
     }
-/*ngx_str_t  url_send=ngx_string("/one.html");
-r->uri.len=9;
-ngx_cpystrn(r->uri.data,url_send.data,10);*/
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "spdy serverpush module header filter 2");
 
-ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "From header Blaha spdy body filter \"%V?%V\"", &r->uri, &r->args);
 
     len = NGX_SPDY_NV_NUM_SIZE
@@ -189,14 +192,8 @@ ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
           + ngx_http_spdy_nv_vsize("418");
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-/*len += ngx_http_spdy_nv_nsize(":scheme")+
-             ngx_http_spdy_nv_vsize("https");
-len +=ngx_http_spdy_nv_nsize(":host")
-             + ngx_http_spdy_nv_vsize("localhost");
-len += ngx_http_spdy_nv_nsize(":path")
-               +ngx_http_spdy_nv_vsize("/index.html");*/
 
-len += ngx_http_spdy_nv_nsize("url")
+    len += ngx_http_spdy_nv_nsize("url")
                +ngx_http_spdy_nv_vsize("https://localhost/test.js");
 
     if (r->headers_out.server == NULL) {
@@ -348,21 +345,10 @@ len += ngx_http_spdy_nv_nsize("url")
     last = ngx_sprintf(last, "%03ui", r->headers_out.status);
 
     count = 2;
-/*last = ngx_http_spdy_nv_write_name(last, ":scheme");
-    last = ngx_http_spdy_nv_write_val(last, "https");
-count++;
-
- last = ngx_http_spdy_nv_write_name(last, ":host");
-    last = ngx_http_spdy_nv_write_val(last, "localhost");
-count++;
-
- last = ngx_http_spdy_nv_write_name(last, ":path");
-    last = ngx_http_spdy_nv_write_val(last, "/index.html");
-count++;*/
-
-last = ngx_http_spdy_nv_write_name(last, "url");
+	
+    last = ngx_http_spdy_nv_write_name(last, "url");
     last = ngx_http_spdy_nv_write_val(last, "https://localhost/test.js");
-count++;
+    count++;
     if (r->headers_out.server == NULL) {
         last = ngx_http_spdy_nv_write_name(last, "server");
         last = clcf->server_tokens
@@ -569,32 +555,25 @@ count++;
 
 
 	//ngx_http_spdy_stream_t *myStream;
-	myStream = ngx_http_spdy_create_stream(sc, 2, 0);
-	//myStream=stream;
-#if 0
-	 len += ngx_http_spdy_nv_nsize("associated-stream-id") + ngx_http_spdy_nv_nsize("1");
-	 last = ngx_http_spdy_nv_write_name(last, "associated-stream-id");
-	 last = ngx_http_spdy_nv_write_val(last, "1");
-#endif
-	 len = last - buf;
-	 b = ngx_create_temp_buf(r->pool, NGX_SPDY_FRAME_HEADER_SIZE
+	
+	myStream = ngx_http_spdy_create_stream(sc, get_next_even_stream_id(), 0);
+	
+	len = last - buf;
+	b = ngx_create_temp_buf(r->pool, NGX_SPDY_FRAME_HEADER_SIZE
 	                             + NGX_SPDY_SYN_STREAM_SIZE
 	                             + deflateBound(&sc->zstream_out, len));
-	    if (b == NULL) {
-	ngx_free(buf);
-	return NGX_ERROR;
-	    }
-
-	    b->last += NGX_SPDY_FRAME_HEADER_SIZE + NGX_SPDY_SYN_STREAM_SIZE;
-
-	    sc->zstream_out.next_in = buf;
-	    sc->zstream_out.avail_in = len;
-	    sc->zstream_out.next_out = b->last;
-	    sc->zstream_out.avail_out = b->end - b->last;
-
-	    rc = deflate(&sc->zstream_out, Z_SYNC_FLUSH);
-
+	if (b == NULL) {
 	    ngx_free(buf);
+	    return NGX_ERROR;
+	}
+
+	b->last += NGX_SPDY_FRAME_HEADER_SIZE + NGX_SPDY_SYN_STREAM_SIZE;
+	sc->zstream_out.next_in = buf;
+	sc->zstream_out.avail_in = len;
+	sc->zstream_out.next_out = b->last;
+	sc->zstream_out.avail_out = b->end - b->last;
+	rc = deflate(&sc->zstream_out, Z_SYNC_FLUSH);
+	ngx_free(buf);
 
 	    if (rc != Z_OK) {
 	ngx_log_error(NGX_LOG_ALERT, c->log, 0,
@@ -683,183 +662,6 @@ count++;
     }
 }
 
-/*static ngx_int_t
-ngx_http_copy_filter(ngx_http_request_t *r, ngx_chain_t *in)
-{
-	ngx_connection_t             *c;
- ngx_output_chain_ctx_t       *ctx;
-    ngx_http_core_loc_conf_t     *clcf;
-    ngx_http_copy_filter_conf_t  *conf;
-int rc;
-
-	 c = r->connection;
-
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                   "http copy filter: \"%V?%V\"", &r->uri, &r->args);
-
- ctx = ngx_http_get_module_ctx(r, ngx_http_spdy_serverpush_filter_module);
-
-    if (ctx == NULL) {
-        ctx = ngx_pcalloc(r->pool, sizeof(ngx_output_chain_ctx_t));
-        if (ctx == NULL) {
-            return NGX_ERROR;
-        }
-
-        ngx_http_set_ctx(r, ctx, ngx_http_spdy_serverpush_filter_module);
-
-        conf = ngx_http_get_module_loc_conf(r, ngx_http_spdy_serverpush_filter_module);
-        clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-
-        ctx->sendfile = c->sendfile;
-        ctx->need_in_memory = r->main_filter_need_in_memory
-                              || r->filter_need_in_memory;
-        ctx->need_in_temp = r->filter_need_temporary;
-
-        ctx->alignment = clcf->directio_alignment;
-
-        ctx->pool = r->pool;
-        ctx->bufs = conf->bufs;
-        ctx->tag = (ngx_buf_tag_t) &ngx_http_spdy_serverpush_filter_module;
-
-        ctx->output_filter = (ngx_output_chain_filter_pt)
-                                  ngx_http_next_body_filter;
-        ctx->filter_ctx = r;
- if (in && in->buf && ngx_buf_size(in->buf)) {
-            r->request_output = 1;
-        }
-}
-rc = ngx_output_chain(ctx, in);
-rc=rc;
- ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                   "YAHOO");
-
-	return 1;
-// start comment 
-
-    ngx_int_t                     rc;
-    ngx_connection_t             *c;
-    ngx_output_chain_ctx_t       *ctx;
-    ngx_http_core_loc_conf_t     *clcf;
-    ngx_http_copy_filter_conf_t  *conf;
-
-    c = r->connection;
-
-    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                   "http copy filter: \"%V?%V\"", &r->uri, &r->args);
-
-    ctx = ngx_http_get_module_ctx(r, ngx_http_spdy_serverpush_filter_module);
-
-    if (ctx == NULL) {
-        ctx = ngx_pcalloc(r->pool, sizeof(ngx_output_chain_ctx_t));
-        if (ctx == NULL) {
-            return NGX_ERROR;
-        }
-
-        ngx_http_set_ctx(r, ctx, ngx_http_spdy_serverpush_filter_module);
-
-        conf = ngx_http_get_module_loc_conf(r, ngx_http_spdy_serverpush_filter_module);
-        clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-
-        ctx->sendfile = c->sendfile;
-        ctx->need_in_memory = r->main_filter_need_in_memory
-                              || r->filter_need_in_memory;
-        ctx->need_in_temp = r->filter_need_temporary;
-
-        ctx->alignment = clcf->directio_alignment;
-
-        ctx->pool = r->pool;
-        ctx->bufs = conf->bufs;
-        ctx->tag = (ngx_buf_tag_t) &ngx_http_spdy_serverpush_filter_module;
-
-        ctx->output_filter = (ngx_output_chain_filter_pt)
-                                  ngx_http_next_body_filter;
-        ctx->filter_ctx = r;
-
-#if (NGX_HAVE_FILE_AIO)
-        if (ngx_file_aio) {
-            if (clcf->aio) {
-                ctx->aio_handler = ngx_http_copy_aio_handler;
-            }
-#if (NGX_HAVE_AIO_SENDFILE)
-            c->aio_sendfile = (clcf->aio == NGX_HTTP_AIO_SENDFILE);
-#endif
-        }
-#endif
-
-        if (in && in->buf && ngx_buf_size(in->buf)) {
-            r->request_output = 1;
-        }
-    }
-
-#if (NGX_HAVE_FILE_AIO)
-    ctx->aio = r->aio;
-#endif
-
-    for ( ;; ) {
-        rc = ngx_output_chain(ctx, in);
-
-        if (ctx->in == NULL) {
-            r->buffered &= ~NGX_HTTP_COPY_BUFFERED;
-
-        } else {
-            r->buffered |= NGX_HTTP_COPY_BUFFERED;
-        }
-
-        ngx_log_debug3(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "http copy filter: %i \"%V?%V\"", rc, &r->uri, &r->args);
-
-#if (NGX_HAVE_FILE_AIO && NGX_HAVE_AIO_SENDFILE)
-
-        if (c->busy_sendfile) {
-            ssize_t                n;
-            off_t                  offset;
-            ngx_file_t            *file;
-            ngx_http_ephemeral_t  *e;
-
-            if (r->aio) {
-                c->busy_sendfile = NULL;
-                return rc;
-            }
-
-            file = c->busy_sendfile->file;
-            offset = c->busy_sendfile->file_pos;
-
-            if (file->aio) {
-                c->aio_sendfile = (offset != file->aio->last_offset);
-                file->aio->last_offset = offset;
-
-                if (c->aio_sendfile == 0) {
-                    ngx_log_error(NGX_LOG_ALERT, c->log, 0,
-                                  "sendfile(%V) returned busy again",
-                                  &file->name);
-                }
-            }
-
-            c->busy_sendfile = NULL;
-            e = (ngx_http_ephemeral_t *) &r->uri_start;
-
-            n = ngx_file_aio_read(file, &e->aio_preload, 1, offset, r->pool);
-
-            if (n > 0) {
-                in = NULL;
-                continue;
-            }
-
-            rc = n;
-
-            if (rc == NGX_AGAIN) {
-                file->aio->data = r;
-                file->aio->handler = ngx_http_copy_aio_sendfile_event_handler;
-
-                r->main->blocked++;
-                r->aio = 1;
-            }
-        }
-#endif
-
-        return rc;
-    }// end comment
-}*/
 
 static ngx_http_spdy_stream_t *
 ngx_http_spdy_create_stream(ngx_http_spdy_connection_t *sc, ngx_uint_t id,
@@ -1228,15 +1030,12 @@ ngx_http_spdy_serverpush_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_http_spdy_stream_t     *stream;
     ngx_http_spdy_out_frame_t  *frame;
    
-ngx_output_chain_ctx_t       *ctx;
-  ctx = ngx_pcalloc(r->pool, sizeof(ngx_output_chain_ctx_t));
- ngx_http_set_ctx(r, ctx, ngx_http_spdy_serverpush_filter_module);
-//ngx_chain_t *myChain=NULL;
-ngx_http_static_handler(r);
-//ngx_http_copy_filter(r,myChain);
-//myChain=myChain;
-    //stream = r->spdy_stream;
-     stream =myStream;
+    ngx_output_chain_ctx_t       *ctx;
+    ctx = ngx_pcalloc(r->pool, sizeof(ngx_output_chain_ctx_t));
+    ngx_http_set_ctx(r, ctx, ngx_http_spdy_serverpush_filter_module);
+    //ngx_chain_t *myChain=NULL;
+    ngx_http_static_handler(r);
+    stream =myStream;
     if (stream == NULL) {
         return ngx_http_next_body_filter(r, in);
     }
@@ -1244,7 +1043,7 @@ ngx_http_static_handler(r);
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "spdy body filter \"%V?%V\"", &r->uri, &r->args);
 
-ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "Data in server Push ");
 
     if (myChain == NULL || r->header_only) {
@@ -1304,12 +1103,7 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
         if (cl == NULL) {
             return NGX_ERROR;
         }
-	/*mycode*/
-	#if 0
-        u_char* my_pos,my_start,my_last,my_end;
-	u_char* my_start  =  
-	#endif
-	/*mycode*/
+	
         size += ngx_buf_size(b);
 	ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "Size %d ",size);
@@ -1347,14 +1141,11 @@ ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
     stream->waiting++;
 
     r->main->blocked++;
-   // return ngx_http_next_body_filter(r,myChain);
+
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "Data in server Push end sai ram ");
-    //return ngx_http_spdy_serverpush_filter_send(r->connection, stream);
     ngx_http_spdy_serverpush_filter_send(r->connection, stream);
     return ngx_http_next_body_filter(r,in);
-   // #endif
-   // return NGX_OK;
 }
 
 
@@ -1663,6 +1454,11 @@ ngx_http_spdy_filter_cleanup(void *data)
     }
 }
 
+static ngx_int_t get_next_even_stream_id()
+{
+    even_stream_id = even_stream_id + 2;
+    return even_stream_id;	
+}
 
 static ngx_int_t
 ngx_http_spdy_serverpush_filter_init(ngx_conf_t *cf)
